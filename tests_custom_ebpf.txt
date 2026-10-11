@@ -1,0 +1,59 @@
+#!/bin/sh
+# ==============================================================================
+# Lynis Test: Audit Unprivileged eBPF Execution & JIT Hardening
+# Test ID: KERN-6050
+# File: /usr/share/lynis/include/tests_custom_ebpf
+# Enhances: tests_kernel (KERN-5601)
+# ==============================================================================
+
+Register --test-no KERN-6050 \
+         --weight M \
+         --network NO \
+         --category security \
+         --description "Check unprivileged eBPF restriction and JIT compiler hardening"
+
+if [ "${SKIPTEST}" -eq 0 ]; then
+    LogText "Test: Auditing unprivileged eBPF parameters and JIT blinding"
+
+    EBPF_SECURE=1
+    FINDINGS_COUNT=0
+
+    # 1. Check unprivileged_bpf_disabled (1 or 2 = safe; 0 = anyone can load code)
+    BPF_DISABLED_FILE="/proc/sys/kernel/unprivileged_bpf_disabled"
+    if [ -f "${BPF_DISABLED_FILE}" ]; then
+        BPF_VAL=$(cat "${BPF_DISABLED_FILE}" 2>/dev/null)
+        LogText "kernel.unprivileged_bpf_disabled = ${BPF_VAL}"
+        if [ "${BPF_VAL}" = "0" ]; then
+            EBPF_SECURE=0
+            FINDINGS_COUNT=$((FINDINGS_COUNT + 1))
+            LogText "Insecure: Unprivileged users can load eBPF programs"
+        fi
+    fi
+
+    # 2. Check bpf_jit_harden constant blinding (2 = hardened; 0 = vulnerable)
+    BPF_HARDEN_FILE="/proc/sys/net/core/bpf_jit_harden"
+    if [ -f "${BPF_HARDEN_FILE}" ]; then
+        HARDEN_VAL=$(cat "${BPF_HARDEN_FILE}" 2>/dev/null)
+        LogText "net.core.bpf_jit_harden = ${HARDEN_VAL}"
+        if [ "${HARDEN_VAL}" = "0" ]; then
+            EBPF_SECURE=0
+            FINDINGS_COUNT=$((FINDINGS_COUNT + 1))
+            LogText "Insecure: eBPF JIT constant blinding is disabled"
+        fi
+    fi
+
+    # 3. Output results
+    if [ -f "${BPF_DISABLED_FILE}" ] || [ -f "${BPF_HARDEN_FILE}" ]; then
+        if [ "${EBPF_SECURE}" -eq 1 ]; then
+            Display --result "OK" --text "Kernel eBPF unprivileged access and JIT are hardened"
+            LogText "eBPF subsystem is properly restricted against unprivileged exploitation"
+        else
+            Display --result "WARNING" --text "Unprivileged eBPF is enabled or JIT blinding is inactive"
+            ReportWarning "KERN-6050" "eBPF subsystem allows unprivileged loading or lacks JIT blinding" \
+                "Set kernel.unprivileged_bpf_disabled=1 and net.core.bpf_jit_harden=2 in /etc/sysctl.conf" "Fix"
+        fi
+    else
+        LogText "eBPF sysctl parameters not exposed on this kernel"
+        Display --result "SKIPPED" --text "eBPF kernel parameters not found"
+    fi
+fi

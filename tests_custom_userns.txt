@@ -1,0 +1,68 @@
+#!/bin/sh
+# ==============================================================================
+# Lynis Test: Audit Unprivileged User Namespaces & Kernel Sandbox Exposure
+# Test ID: KERN-6040
+# File: /usr/share/lynis/include/tests_custom_userns
+# Enhances: tests_kernel (KERN-5601)
+# ==============================================================================
+
+Register --test-no KERN-6040 \
+         --weight M \
+         --network NO \
+         --category security \
+         --description "Check unprivileged user namespace restriction and container isolation posture"
+
+if [ "${SKIPTEST}" -eq 0 ]; then
+    LogText "Test: Auditing unprivileged user namespace kernel controls"
+
+    USERNS_RESTRICTED=0
+    AUDIT_PERFORMED=0
+
+    # 1. Debian/Ubuntu legacy control
+    USERNS_CLONE_FILE="/proc/sys/kernel/unprivileged_userns_clone"
+    if [ -f "${USERNS_CLONE_FILE}" ]; then
+        AUDIT_PERFORMED=1
+        CLONE_VAL=$(cat "${USERNS_CLONE_FILE}" 2>/dev/null)
+        LogText "kernel.unprivileged_userns_clone = ${CLONE_VAL}"
+        if [ "${CLONE_VAL}" = "0" ]; then
+            USERNS_RESTRICTED=1
+        fi
+    fi
+
+    # 2. Universal upstream Linux ceiling
+    MAX_USERNS_FILE="/proc/sys/user/max_user_namespaces"
+    if [ -f "${MAX_USERNS_FILE}" ]; then
+        AUDIT_PERFORMED=1
+        MAX_VAL=$(cat "${MAX_USERNS_FILE}" 2>/dev/null)
+        LogText "user.max_user_namespaces = ${MAX_VAL}"
+        if [ "${MAX_VAL}" = "0" ]; then
+            USERNS_RESTRICTED=1
+        fi
+    fi
+
+    # 3. Modern AppArmor mediation (Ubuntu 24.04+)
+    APPARMOR_USERNS_FILE="/proc/sys/kernel/apparmor_restrict_unprivileged_userns"
+    if [ -f "${APPARMOR_USERNS_FILE}" ]; then
+        AUDIT_PERFORMED=1
+        AA_VAL=$(cat "${APPARMOR_USERNS_FILE}" 2>/dev/null)
+        LogText "kernel.apparmor_restrict_unprivileged_userns = ${AA_VAL}"
+        if [ "${AA_VAL}" = "1" ]; then
+            USERNS_RESTRICTED=1
+        fi
+    fi
+
+    # 4. Evaluation and output
+    if [ "${AUDIT_PERFORMED}" -eq 1 ]; then
+        if [ "${USERNS_RESTRICTED}" -eq 1 ]; then
+            Display --result "OK" --text "Unprivileged user namespaces are restricted"
+            LogText "Kernel restricts unprivileged user namespaces"
+        else
+            Display --result "SUGGESTION" --text "Unprivileged user namespaces are enabled without restrictions"
+            ReportSuggestion "KERN-6040" "Unprivileged user namespaces increase attack surface for kernel exploits (LPE)" \
+                "If rootless containers are not required, set user.max_user_namespaces=0 or configure AppArmor mediation" "Text"
+        fi
+    else
+        LogText "User namespace controls not exposed via /proc/sys on this kernel"
+        Display --result "SKIPPED" --text "Kernel user namespace parameters not present"
+    fi
+fi
