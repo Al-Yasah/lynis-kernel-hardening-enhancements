@@ -1,0 +1,24 @@
+#!/bin/sh
+# Reference Script: Base Lynis Kernel Parameter Audit
+# Target: /usr/share/lynis/include/tests_kernel
+
+Register --test-no KERN-5601 \
+         --weight L \
+         --network NO \
+         --category security \
+         --description "Check basic kernel sysctl parameters"
+
+if [ "${SKIPTEST}" -eq 0 ]; then
+    LogText "Test: Auditing standard core dump and sysctl hardening"
+
+    CORE_DUMP_FILE="/proc/sys/fs/suid_dumpable"
+    if [ -f "${CORE_DUMP_FILE}" ]; then
+        DUMP_VAL=$(cat "${CORE_DUMP_FILE}" 2>/dev/null)
+        if [ "${DUMP_VAL}" = "0" ]; then
+            Display --result "OK" --text "Core dumps for setuid binaries are disabled"
+        else
+            Display --result "WARNING" --text "Core dumps for setuid binaries are enabled"
+            ReportWarning "KERN-5601" "suid_dumpable is not 0" "Set fs.suid_dumpable=0" "Fix"
+        fi
+    fi
+fi
